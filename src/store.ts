@@ -1,6 +1,7 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit'
 import { createApi, fakeBaseQuery } from '@reduxjs/toolkit/query/react'
-import type { ScoreComment, ScoreNote, ScoreVersion, Track } from './types'
+import revisionImportReducer from './revisionImport'
+import type { ImportLog, ScoreComment, ScoreNote, ScoreVersion, Track } from './types'
 import { seedComments, seedTracks, seedVersions } from './mock'
 
 interface ScoreState {
@@ -11,14 +12,22 @@ interface ScoreState {
   future: string[]
   comments: ScoreComment[]
   versions: ScoreVersion[]
+  historyLogs: ImportLog[]
   dirty: boolean
 }
 
+const seedHistoryLogs: ImportLog[] = [
+  { id: 'H-1', time: '今天 16:28', color: 'green', message: '沈青提交 v12：调整终段和声，补充圆号力度与连音线' },
+  { id: 'H-2', time: '今天 14:10', color: 'blue', message: '方亦修改圆号力度，生成本地草稿' },
+  { id: 'H-3', time: '今天 14:10', color: 'gray', message: '发布 v11：单簧管移调分谱' },
+]
+
 const initialState: ScoreState = {
-  tracks: structuredClone(seedTracks), selectedTrackId: 'TR-01', selectedNoteIndex: 2, history: [], future: [], comments: structuredClone(seedComments), versions: structuredClone(seedVersions), dirty: false,
+  tracks: structuredClone(seedTracks), selectedTrackId: 'TR-01', selectedNoteIndex: 2, history: [], future: [], comments: structuredClone(seedComments), versions: structuredClone(seedVersions), historyLogs: seedHistoryLogs, dirty: false,
 }
 
-function snapshot(state: ScoreState) { state.history.push(JSON.stringify(state.tracks)); if (state.history.length > 40) state.history.shift(); state.future = []; state.dirty = true; localStorage.setItem('yy55-score-draft', JSON.stringify({ tracks: state.tracks, comments: state.comments })) }
+function snapshot(state: ScoreState) { state.history.push(JSON.stringify(state.tracks)); if (state.history.length > 40) state.history.shift(); state.future = []; state.dirty = true; persistDraft(state) }
+function persistDraft(state: ScoreState) { localStorage.setItem('yy55-score-draft', JSON.stringify({ tracks: state.tracks, comments: state.comments, versions: state.versions, historyLogs: state.historyLogs })) }
 function transposeKey(key: string, semitones: number) {
   const chromatic = ['c','c#','d','d#','e','f','f#','g','g#','a','a#','b']
   const [pitch, octaveText] = key.split('/')
@@ -45,8 +54,33 @@ const scoreSlice = createSlice({
     undo(state) { const previous = state.history.pop(); if (!previous) return; state.future.push(JSON.stringify(state.tracks)); state.tracks = JSON.parse(previous); state.dirty = true },
     redo(state) { const next = state.future.pop(); if (!next) return; state.history.push(JSON.stringify(state.tracks)); state.tracks = JSON.parse(next); state.dirty = true },
     resolveComment(state, action: PayloadAction<string>) { const comment = state.comments.find((item) => item.id === action.payload); if (comment) comment.resolved = true; state.dirty = true },
-    saveVersion(state) { state.versions.unshift({ id: `v${state.versions.length + 13}`, author: '当前用户', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }), summary: '保存当前总谱与分谱调整', trackNotes: Object.fromEntries(state.tracks.map((track) => [track.id, structuredClone(track.notes)])) }); state.dirty = false; localStorage.removeItem('yy55-score-draft') },
-    restoreDraft(state) { const raw = localStorage.getItem('yy55-score-draft'); if (!raw) return; const draft = JSON.parse(raw); state.tracks = draft.tracks; state.comments = draft.comments; state.dirty = true },
+    saveVersion(state) { state.versions.unshift({ id: `v${state.versions.length + 13}`, author: '当前用户', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }), summary: '保存当前总谱与分谱调整', trackNotes: Object.fromEntries(state.tracks.map((track) => [track.id, structuredClone(track.notes)])) }); state.dirty = false; persistDraft(state) },
+    saveVersionAs(state, action: PayloadAction<{ summary: string; author?: string }>) {
+      state.versions.unshift({ id: `v${state.versions.length + 13}`, author: action.payload.author ?? '当前用户', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }), summary: action.payload.summary, trackNotes: Object.fromEntries(state.tracks.map((track) => [track.id, structuredClone(track.notes)])) })
+      state.dirty = false
+      persistDraft(state)
+    },
+    applyRevisionChanges(state, action: PayloadAction<{ changes: { trackId: string; index: number; note: ScoreNote }[] }>) {
+      snapshot(state)
+      action.payload.changes.forEach((change) => {
+        const track = state.tracks.find((item) => item.id === change.trackId)
+        if (track && track.notes[change.index]) track.notes[change.index] = { ...change.note, id: track.notes[change.index]!.id }
+      })
+      state.dirty = true
+    },
+    appendHistoryLogs(state, action: PayloadAction<ImportLog[]>) {
+      state.historyLogs.push(...action.payload)
+      persistDraft(state)
+    },
+    restoreDraft(state) {
+      const raw = localStorage.getItem('yy55-score-draft'); if (!raw) return
+      const draft = JSON.parse(raw)
+      if (draft.tracks) state.tracks = draft.tracks
+      if (draft.comments) state.comments = draft.comments
+      if (draft.versions) state.versions = draft.versions
+      if (draft.historyLogs) state.historyLogs = draft.historyLogs
+      state.dirty = true
+    },
   },
 })
 
@@ -58,7 +92,11 @@ export const scoreApi = createApi({
   }),
 })
 
-export const { selectTrack, selectNote, addNote, removeNote, updateNote, transposeTrack, undo, redo, resolveComment, saveVersion, restoreDraft } = scoreSlice.actions
-export const store = configureStore({ reducer: { score: scoreSlice.reducer, [scoreApi.reducerPath]: scoreApi.reducer }, middleware: (getDefault) => getDefault().concat(scoreApi.middleware) })
+export const { selectTrack, selectNote, addNote, removeNote, updateNote, transposeTrack, undo, redo, resolveComment, saveVersion, saveVersionAs, applyRevisionChanges, appendHistoryLogs, restoreDraft } = scoreSlice.actions
+export const store = configureStore({
+  reducer: { score: scoreSlice.reducer, revisionImport: revisionImportReducer, [scoreApi.reducerPath]: scoreApi.reducer },
+  middleware: (getDefault) => getDefault().concat(scoreApi.middleware),
+})
 export type RootState = ReturnType<typeof store.getState>
 export type AppDispatch = typeof store.dispatch
+export type AppThunk = (dispatch: AppDispatch, getState: () => RootState) => void

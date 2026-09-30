@@ -1,9 +1,10 @@
+import { useEffect } from 'react'
 import { Layout, Menu, Button, Tag, Space } from 'antd'
 import { AudioOutlined, FileTextOutlined, HistoryOutlined, SaveOutlined } from '@ant-design/icons'
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import type { AppDispatch, RootState } from './store'
-import { saveVersion } from './store'
+import { restoreDraft, saveVersion } from './store'
 import Overview from './pages/Overview'
 import ScoreEditor from './pages/ScoreEditor'
 import Parts from './pages/Parts'
@@ -13,6 +14,7 @@ export default function App() {
   const location = useLocation()
   const dispatch = useDispatch<AppDispatch>()
   const dirty = useSelector((state: RootState) => state.score.dirty)
+  useEffect(() => { dispatch(restoreDraft()) }, [dispatch])
   const items = [
     { key: '/', icon: <AudioOutlined />, label: <Link to="/">作品总览</Link> },
     { key: '/score', icon: <FileTextOutlined />, label: <Link to="/score">总谱编辑</Link> },
