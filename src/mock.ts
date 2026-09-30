@@ -1,4 +1,4 @@
-import type { ScoreComment, ScoreNote, ScoreVersion, Track } from './types'
+import type { LogEntry, ScoreComment, ScoreNote, ScoreVersion, Track } from './types'
 
 const notes = (keys: string[]): ScoreNote[] => keys.map((key, index) => ({ id: `N-${index + 1}`, key, duration: index % 4 === 0 ? 'h' : 'q', dynamic: index < 2 ? 'mp' : 'mf', tie: index === 2, expression: index === 3 ? 'dolce' : '' }))
 
@@ -15,7 +15,24 @@ export const seedComments: ScoreComment[] = [
   { id: 'CM-3', measure: 6, author: '出版 · 赵晴', content: '单簧管分谱需在换页处保留 2 小节提示音。', resolved: true },
 ]
 
+const cloneNotes = (track: Track): ScoreNote[] => track.notes.map((note) => ({ ...note }))
+const snapshotAll = (): Record<string, ScoreNote[]> => Object.fromEntries(seedTracks.map((track) => [track.id, cloneNotes(track)]))
+
+/** v12 出版基线：工作台现行稿在其后又有两处改动（圆号力度、长笛延音线） */
+const v12Notes = (): Record<string, ScoreNote[]> => {
+  const map = snapshotAll()
+  map['TR-03']![4]!.dynamic = 'p'
+  map['TR-01']![2]!.tie = false
+  return map
+}
+
 export const seedVersions: ScoreVersion[] = [
-  { id: 'v12', author: '沈青', time: '今天 16:28', summary: '调整终段和声，补充圆号力度与连音线', trackNotes: { 'TR-03': seedTracks[2]!.notes } },
-  { id: 'v11', author: '方亦', time: '今天 14:10', summary: '移调单簧管分谱并调整换气标记', trackNotes: { 'TR-02': seedTracks[1]!.notes } },
+  { id: 'v12', author: '沈青', time: '今天 16:28', summary: '调整终段和声，补充圆号力度与连音线', trackNotes: v12Notes() },
+  { id: 'v11', author: '方亦', time: '今天 14:10', summary: '移调单簧管分谱并调整换气标记', trackNotes: snapshotAll() },
+]
+
+export const seedLogs: LogEntry[] = [
+  { id: 'LG-seed-1', time: '16:28', kind: 'version', text: '沈青提交 v12：调整终段和声与连音线' },
+  { id: 'LG-seed-2', time: '15:40', kind: 'system', text: '方亦修改圆号力度，生成本地草稿' },
+  { id: 'LG-seed-3', time: '14:10', kind: 'version', text: '发布 v11：单簧管移调分谱' },
 ]
